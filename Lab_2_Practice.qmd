@@ -1,0 +1,130 @@
+---
+title: "Lab 2 - Practice"
+author: "Madi Calbert"
+format: 
+  html:
+    code-fold: show
+    toc: true
+    number-sections: true
+editor: visual
+execute: 
+  echo: true
+  message: false
+  warning: false 
+---
+
+## Lab 2 Practice
+
+```{r}
+library(tidyverse)
+library(here)
+library(tsibble)
+library(feasts)
+library(fable)
+```
+
+```{r}
+mauna_loa_df <- read_csv(here("data/co2_mauna_loa.csv"))
+```
+
+### Analysis Part 1
+
+Convert the date column to a proper date format, then turn the dataframe into a time-series dataframe.
+
+○ hint: lubridate::ym() is not the same as tsibble::yearmonth()... the first works great to convert character class to date class, but the second converts to tsibble yearmonth class, which enables functionality from the feasts and fable packages.
+
+```{r}
+maunaloa_ts <- mauna_loa_df %>% 
+  mutate(date = tsibble::yearmonth(date)) %>% 
+  as_tsibble(index = date,
+             key = NULL)
+```
+
+Create an exploratory season plot and an exploratory subseries plot.
+
+```{r}
+maunaloa_plot <- ggplot(maunaloa_ts, aes(x = date, y = co2_mean))+ 
+  geom_line() + 
+  labs(x = "Date (Year)", y = "Mean CO2")
+maunaloa_plot
+```
+
+```{r}
+maunaloa_ts %>% 
+  gg_season(y = co2_mean, pal = hcl.colors(n = 9)) +
+  theme_light() +
+  labs(x = 'Month', y = 'Mean CO2 Emissions (ppm)')
+```
+
+```{r}
+maunaloa_ts %>% 
+  gg_subseries(y = co2_mean) +
+  labs(x = 'Year', y = 'Mean CO2 Emissions (ppm)')
+```
+
+### Analysis Part 2
+
+Create an ETS exponential smoothing model, including (if appropriate) seasonality and trend. Consider whether the trend and seasonality should be considered as additive or multiplicative (you can try different combinations to see how it changes your forecast).
+
+```{r}
+dcmp <- maunaloa_ts %>% 
+  model(feasts::STL(co2_mean ~ season(period = '1 year') +
+                      trend(window = 49)))
+
+components(dcmp) %>% 
+  autoplot()
+```
+
+Use the ETS model to forecast CO2 levels for the next 20 years, then plot that forecast on the original data using autoplot().
+
+```{r}
+maunaloa_fit <- maunaloa_ts %>% 
+  model(ets = ETS(co2_mean ~ season(method = "M") + trend(method = "A")))
+
+maunaloa_forecast <- maunaloa_fit %>% 
+  forecast(h = '20 years') 
+
+maunaloa_forecast %>% 
+  autoplot(maunaloa_ts)
+```
+
+Use the ETS model and broom::augment to fit modeled values against the actual observed values. Plot the two together, and plot a histogram of the residuals. How well does our model fit our historic observed values?
+
+```{r}
+co2_predicted <- maunaloa_fit %>% 
+  broom::augment()
+
+ggplot(co2_predicted) +
+  geom_line(aes(x = date, y = co2_mean)) +
+  geom_line(aes(x = date, y = .fitted), color = 'red', alpha = 0.7)
+
+ggplot(co2_predicted, aes(x = .resid)) +
+  geom_histogram()
+```
+
+Optional: create an ETS model just trained on data through 2003, and then create a 20-year forecast - and then compare those forecasted values against the observed values from 2004-2023.
+
+```{r}
+maunaloa_fit_03 <- maunaloa_ts %>% 
+  filter_index(. ~ "2003 Jan") %>%
+  model(ets = ETS(co2_mean ~ season(method = "M") + trend(method = "A")))
+
+maunaloa_forecast <- maunaloa_fit_03 %>% 
+  forecast(h = '20 years') 
+
+maunaloa_forecast %>% 
+  autoplot(maunaloa_ts)
+
+```
+
+### Follow up Questions
+
+1.  Write a sentence or two describing the trends you see in the exploratory plots. Describe any seasonality, trend, or cyclicality you observe.
+
+-   There is an upward trend over the years, seonality is high in the spring and low in the fall. There is no cyclicality. There is no pattern in the noise.
+
+2.  In your ETS time series model, explain whether an additive or multiplicative model would make more sense, in terms of the relationship between carbon dioxide, humans, and environmental factors.
+
+-   We know that the trend is additive becasue the trend is linear and there is constant variability.
+-   We know the seasonality is multiplicative because the data has changing variability and has non-linear trends.
+-   The seasonality is based on environmental factors and the trend is based on anthropogenic factors.
